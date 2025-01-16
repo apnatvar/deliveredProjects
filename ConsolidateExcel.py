@@ -1,6 +1,7 @@
 import os, sys
 from argparse import ArgumentParser
 import pandas as pd
+import concurrent.futures
 import logging
 
 logging.basicConfig(level=logging.DEBUG,
@@ -35,6 +36,7 @@ def separateExcelWorksheets(pathToFile, sheetNames):
             df.to_csv(f"{pathAsList[-1][:-5]}.{sheet}.csv", index=False)
 
 def findFilesToSeparate(args, sheetNames, path='.'):
+    pool = concurrent.futures.ThreadPoolExecutor()
     for entry in os.listdir(path):
         fullPath = os.path.join(path, entry)
         logging.debug('Searching in ', fullPath)
@@ -46,7 +48,8 @@ def findFilesToSeparate(args, sheetNames, path='.'):
                     logging.debug('Rename Argument(Confirmation): ' + str(args.rename))
                     fullPath = renameFiles(fullPath)
                 logging.debug('file found with path: ',fullPath)
-                separateExcelWorksheets(fullPath, sheetNames)
+                pool.submit(separateExcelWorksheets, fullPath, sheetNames) # opening and retrieving data from excel sheets takes a lot of time so with multi-threading the program is able to do multiple files concurrently
+    pool.shutdown(wait=True)
     return True
 
 def combineSeparatedSheets(sheetNames):
