@@ -5,27 +5,10 @@ from tkinter import Tk, Button, Label, filedialog, messagebox
 from openpyxl import load_workbook
 
 replaceDict = {
-    "Unspent Amount Payable to Development Work": "Unutilized Amount of Development Work",
-    "GIS Claim Payable": "GIS Claim Payable to Ex-Employee",
-    "Group Insurance Scheme": "Group Insurance Scheme Payable",
-    "GSLI Payable": "GSLI Payable to Ex-Employee",
-    "RCM Payable": "GST RCM Payable",
-    "TDS on GST Payable": "GST TDS Payable",
-    "Tax Collection at Source": "Income Tax(TCS) Payable",
-    "Tax Deducted at Source": "Income Tax(TDS)Payable",
-    "Other Recovery (Material Loss)": "Recovery agt Material Loss (Staff)",
-    "House Building Advance3": "Recovery of House Building Advance",
-    "Vehicles Advance": "Recovery of Vehicles Advance",
-    "Other Recovery": "Recovery - Other",
-    "Security Against Contractors": "Security Deposit from Contractors",
-    "Employee's Security": "Security from Employee",
-    "Staff Gratuity": "Provision for Staff Gratuity",
-    "Plant & Machinery (Others) @ 15%": "Plant & Machinery @ 15%",
-    "House Building Advance7": "Advance For House Building to Staff",
-    "Vehicle Advance": "Advance For Vehicle to Staff",
-    "RCM Input available": "GST RCM Input Available",
-    "Other Security": "Security Deposited - Other",
+    # replace with your own requirements
 }
+
+SUPPORTED_EXTS = [".xlsx", ".xlsm"]
 
 
 def timestamp() -> str:
@@ -57,10 +40,81 @@ def process_workbook(file_path: str, rep_dict: dict) -> dict:
         raise FileNotFoundError(f"File not found: {file_path}")
 
     ext = path.suffix.lower()
-    if ext in (".xlsx", ".xlsm"):
+    if ext in SUPPORTED_EXTS:
         return process_xlsx_xlsm(path, rep_dict)
     else:
         raise ValueError("Unsupported file type. Use .xlsx, .xlsm")
+
+
+def process_path(path_like, rep_dict: dict, recursive: bool = True):
+    """
+    Process a single Excel file or every supported Excel file in a folder.
+    `process_workbook(file_path: str, rep_dict: dict)` and `SUPPORTED_EXTS`.
+
+    Returns a summary dict:
+    {
+      "mode": "file" | "folder",
+      "files_processed": int,
+      "files_succeeded": int,
+      "files_failed": int,
+      "total_counts": {key: int, ...},
+      "per_file_counts": { "file.xlsx": {key: int, ...}, ... },
+      "failures": [("file.xlsb", "ErrorMessage"), ...]
+    }
+    """
+    p = Path(path_like)
+    if not p.exists():
+        raise FileNotFoundError(f"Path not found: {p}")
+
+    def is_supported_excel(f: Path) -> bool:
+        # Skip Excel temp/lock files
+        if f.name.startswith("~$"):
+            return False
+        return f.suffix.lower() in SUPPORTED_EXTS
+
+    total_counts = {k: 0 for k in rep_dict.keys()}
+    per_file_counts = {}
+    failures = []
+
+    if p.is_file():
+        counts = process_workbook(str(p), rep_dict)
+        per_file_counts[p.name] = counts
+        for k, v in counts.items():
+            total_counts[k] += v
+        return {
+            "mode": "file",
+            "files_processed": 1,
+            "files_succeeded": 1,
+            "files_failed": 0,
+            "total_counts": total_counts,
+            "per_file_counts": per_file_counts,
+            "failures": failures,
+        }
+
+    # Folder mode
+    files = p.rglob("*") if recursive else p.glob("*")
+    targets = [f for f in files if f.is_file() and is_supported_excel(f)]
+
+    succeeded = 0
+    for f in sorted(targets):
+        try:
+            counts = process_workbook(str(f), rep_dict)
+            per_file_counts[str(f)] = counts
+            for k, v in counts.items():
+                total_counts[k] += v
+            succeeded += 1
+        except Exception as e:
+            failures.append((str(f), f"{type(e).__name__}: {e}"))
+
+    return {
+        "mode": "folder",
+        "files_processed": len(targets),
+        "files_succeeded": succeeded,
+        "files_failed": len(failures),
+        "total_counts": total_counts,
+        "per_file_counts": per_file_counts,
+        "failures": failures,
+    }
 
 
 # ------------------ Tkinter GUI ------------------
@@ -80,6 +134,52 @@ class App:  # Tested on Windows Only
 
         self.status = Label(root, text="", fg="gray")
         self.status.pack(pady=5)
+
+        self.folder_btn = Button(
+            root,
+            text="Choose Folder and Run (recursive)",
+            command=self.choose_folder_and_run,
+        )
+        self.folder_btn.pack(pady=2)
+
+    def choose_folder_and_run(self):
+        folder = filedialog.askdirectory(title="Select folder containing Excel files")
+        if not folder:
+            return
+        self.status.config(text="Running (folder)...")
+        self.button.config(state="disabled")
+        self.folder_btn.config(state="disabled")
+        root.update_idletasks()
+
+        try:
+            summary = process_path(folder, replaceDict, recursive=True)
+            total = sum(summary["total_counts"].values())
+            lines = [
+                "Batch complete.",
+                f"Mode: {summary['mode']}",
+                f"Files processed: {summary['files_processed']}",
+                f"Succeeded: {summary['files_succeeded']} | Failed: {summary['files_failed']}",
+                f"Total cells changed: {total}",
+            ]
+            nz = {k: v for k, v in summary["total_counts"].items() if v}
+            if nz:
+                lines.append("Total per-key counts:")
+                width = max(len(str(k)) for k in nz)
+                for k in sorted(nz):
+                    lines.append(f"  {str(k).ljust(width)} : {nz[k]}")
+            if summary["failures"]:
+                lines.append("\nFailures:")
+                for fpath, err in summary["failures"][:10]:                           
+                    lines.append(f"  {fpath} -> {err}")
+
+            self.status.config(text="Done.")
+            messagebox.showinfo("Done", "\n".join(lines))
+        except Exception as e:
+            self.status.config(text="Error.")
+            messagebox.showerror("Error", f"{type(e).__name__}: {e}")
+        finally:
+            self.button.config(state="normal")
+            self.folder_btn.config(state="normal")
 
     def run(self):
         filetypes = [
