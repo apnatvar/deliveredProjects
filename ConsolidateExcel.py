@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import pandas as pd
-import os, sys
+import os
 import concurrent.futures
 
 # Function to open file dialog and select a CSV file
@@ -29,25 +29,25 @@ def checkNumberOfFiles(numberRequired):
 
 # Total Only
 def prepareTotalByUnitName(workbook):
-    workbookTotal = workbook.drop(['F'], axis=1)
+    workbookTotal = workbook.drop(['F-Description  of Services'], axis=1)
     workbookTotal = workbookTotal.groupby(['A-Unit Name']).sum()
     workbookTotal.to_csv('./Reverse Charges Files/RCMTotalOnly.csv')
 
 # By Service
 def prepareTotalByUnitNameAndService(workbook):
-    workbookByService = workbook.groupby(['A','']).sum()
-    workbookByService.to_csv('./R/R.csv')
+    workbookByService = workbook.groupby(['A-Unit Name','F-Description  of Services']).sum()
+    workbookByService.to_csv('./Reverse Charges Files/RCMTotalyByService.csv')
 
 # By Service with Subtotal
 def prepareTotalByUnitNameAndServiceWithSubtotal(workbook):
-    workbookByService = workbook.groupby(['A','F']).sum().reset_index()
+    workbookByService = workbook.groupby(['A-Unit Name','F-Description  of Services']).sum().reset_index()
 
-    subtotal = workbookByService.groupby('A').sum()
+    subtotal = workbookByService.groupby('A-Unit Name').sum()
     subtotal['F-Description  of Services'] = 'Subtotal'
     subtotal = subtotal.reset_index()
 
     result = pd.concat([workbookByService, subtotal], ignore_index=True)
-    result = result.sort_values(by=['A','F'], key=lambda col: col.map({'Subtotal': 'zzzz'}).fillna(col)).reset_index(drop=True)
+    result = result.sort_values(by=['A-Unit Name','F-Description  of Services'], key=lambda col: col.map({'Subtotal': 'zzzz'}).fillna(col)).reset_index(drop=True)
     result.to_csv('./Reverse Charges Files/RCMTotalyByServiceWithSubtotal.csv', index=False)
 
 # generating 5% and 18% and Tax Columns
@@ -70,7 +70,8 @@ def generate5And18TaxColumns(workbook):
 
 def separateExcelWorksheets(pathToFile):
     pathAsList = pathToFile.split("/")
-    sheetsToUse = ["Summary", "01", "02", "03", "04", "05"]
+    sheetsToUse = ["Summary", "01 Outward Supply", "02 Reverse Charges", "03 GST-TDS", "04 Inward Supplies (ITC)", "05 Debit & Credit Note"]
+    # sheetsToUse = ["Summary", "01 Tax Invoice Outward", "02 Bill Of Supply Outward", "03 Reverse Charges", "04 GST-TDS", "05 Inward Supplies", "06 Debit & Credit Note"]
 
     for sheet in sheetsToUse:
         try:
@@ -92,7 +93,7 @@ def listFilesRecursive(path):
         if os.path.isdir(fullPath):
             listFilesRecursive(fullPath)
         else:
-            if fullPath[-5:] == '.xlsm' or fullPath[-5:] == '.xlsb' or fullPath[-5:] == '.xlsx':
+            if fullPath[-5:] == '.xlsm' or fullPath[-5:] == '.xlsb' or fullPath[-5:] == '.xlxs':
                 pool.submit(separateExcelWorksheets, fullPath)
     pool.shutdown(wait=True)
 
@@ -107,7 +108,7 @@ def reverseChargesFile():
         os.makedirs("./Reverse Charges Files", exist_ok=True)
 
         workbook = pd.read_csv(filePath)
-        workbook = workbook.drop(['B', 'C', 'D', 'E'], axis=1)
+        workbook = workbook.drop(['B-Name of Firm', 'C-Invoice Number Generate By Unit', 'D-Invoice date', 'E-Date of Payment'], axis=1)
         workbook = generate5And18TaxColumns(workbook)
 
         prepareTotalByUnitName(workbook)
@@ -128,13 +129,13 @@ def GSTConsolidation():
         return
 
     try:
-        os.makedirs("./GFiles", exist_ok=True)
+        os.makedirs("./GST-TDS Consolidation Files", exist_ok=True)
 
         dfGST = pd.read_csv(filePath)
         dfGST = dfGST.drop('D-Date of Payment', axis=1)
-        dfGST['B'] = dfGST['B'].str.strip()
+        dfGST['B-GST No of Supplier'] = dfGST['B-GST No of Supplier'].str.strip()
 
-        columnsToFloat = ['E', 'F', 'G', 'H', 'I']
+        columnsToFloat = ['E-Taxable Amount Paid', 'F-TDS-IGST', 'G-TDS-CGST', 'H-TDS-SGST', 'I-Total']
         for columns in columnsToFloat:
             dfGST[columns] = dfGST[columns].replace('NIL', '0', regex=True)
             dfGST[columns] = dfGST[columns].astype('float')
@@ -144,22 +145,22 @@ def GSTConsolidation():
             for col in dfGST.columns if col != 'B-GST No of Supplier'
         }
 
-        dfByGSTAndName = dfGST.groupby(['A','Br'], as_index=False).agg(aggregationFunction)
+        dfByGSTAndName = dfGST.groupby(['A-Unit Name','B-GST No of Supplier'], as_index=False).agg(aggregationFunction)
         dfByGSTAndName = dfByGSTAndName.sort_values(by='A-Unit Name')
-        dfByGSTAndName.to_csv("./GFiles/G.csv", index=False)
+        dfByGSTAndName.to_csv("./GST-TDS Consolidation Files/GST-TDSandName.csv", index=False)
 
-        dfByGST = dfGST.groupby(['B'], as_index=False).agg(aggregationFunction)
-        dfByGST = dfByGST.drop('A', axis=1)
-        dfByGST.to_csv("./GFiles/G.csv", index=False)
+        dfByGST = dfGST.groupby(['B-GST No of Supplier'], as_index=False).agg(aggregationFunction)
+        dfByGST = dfByGST.drop('A-Unit Name', axis=1)
+        dfByGST.to_csv("./GST-TDS Consolidation Files/GST-TDSOnly.csv", index=False)
 
         print("Success")
-        messagebox.showinfo("Success", "Required CSVs have been generated and are in the GFiles folder")
+        messagebox.showinfo("Success", "Required CSVs have been generated and are in the GST Consolidation Files folder")
 
     except Exception as e:
         messagebox.showerror("Error", f"Problem in processing File. \n{str(e)}")
 
 def inwardInvoiceMatching():
-    messagebox.showinfo("Locate File (Excel Worksheet Format)", "Locate the File")
+    messagebox.showinfo("Locate File (Excel Worksheet Format)", "Locate the 2B File")
     browseFile()
     filePath2B = filePathVariable.get()
     if not filePath2B:
@@ -168,15 +169,16 @@ def inwardInvoiceMatching():
 
     try:
         df2B = pd.read_excel(filePath2B, sheet_name="B2B", skiprows=4)
+        df2B.rename(columns={'Invoice Details': 'Invoice Number', 'Unnamed: 3': 'Invoice Type', 'Unnamed: 4': 'Invoice Date', 'Unnamed: 5': 'Invoice Value', 'Tax Amount': 'Integrated Tax', 'Unnamed: 10': 'Central Tax', 'Unnamed: 11' : 'State/UT Tax', 'Unnamed: 12' : 'Cess'}, inplace=True)
         df2B.drop(index=0, inplace=True)
-        df2B['T'] = df2B['T'].astype('float64')
-        df2B['I'] = df2B['I'].astype('string')
+        df2B['Taxable Value (₹)'] = df2B['Taxable Value (₹)'].astype('float64')
+        df2B['Invoice Number'] = df2B['Invoice Number'].astype('string')
 
     except Exception as e:
         messagebox.showerror("Error", f"Problem in processing 2B File. \n{str(e)}")
         return
 
-    messagebox.showinfo("Locate File (CSV Format)", "Locate the File")
+    messagebox.showinfo("Locate File (CSV Format)", "Locate the Combined Inward Supplies File")
     browseFile()
     filePathInwardSupply = filePathVariable.get()
     if not filePathInwardSupply:
@@ -185,8 +187,8 @@ def inwardInvoiceMatching():
 
     try:
         csvInwardSupply = pd.read_csv(filePathInwardSupply)
-        csvInwardSupply['D'] = csvInwardSupply['D'].astype('string')
-        csvInwardSupply['G'] = csvInwardSupply['G'].astype('float64')
+        csvInwardSupply['D-Invoice No.'] = csvInwardSupply['D-Invoice No.'].astype('string')
+        csvInwardSupply['G-Taxable Value'] = csvInwardSupply['G-Taxable Value'].astype('float64')
 
     except Exception as e:
         messagebox.showerror("Error", f"Problem in processing Inward Supply File. \n{str(e)}")
@@ -195,19 +197,19 @@ def inwardInvoiceMatching():
     try:
         os.makedirs("./ITC Files", exist_ok=True)
 
-        dfInvoiceAmount = pd.merge(df2B, csvInwardSupply, left_on=['I', 'T'], right_on=['D','G'], how='inner')
-        dfInvoiceAmount = dfInvoiceAmount[['G', 'T', 'I', 'D', 'T', 'G', 'A']]
-        dfInvoiceAmount.to_csv('./IFiles/ITCInvoiceAndAmountMatched.csv', index=False)
+        dfInvoiceAmount = pd.merge(df2B, csvInwardSupply, left_on=['Invoice Number', 'Taxable Value (₹)'], right_on=['D-Invoice No.','G-Taxable Value'], how='inner')
+        dfInvoiceAmount = dfInvoiceAmount[['GSTIN of supplier', 'Trade/Legal name', 'Invoice Number', 'D-Invoice No.', 'Taxable Value (₹)', 'G-Taxable Value', 'A-Unit Name']]
+        dfInvoiceAmount.to_csv('./ITC Files/ITCInvoiceAndAmountMatched.csv', index=False)
 
-        dfInvoice = pd.merge(df2B, csvInwardSupply, left_on=['I'], right_on=['D'], how='outer', indicator=True)
-        dfInvoice = dfInvoice[['G', 'T', 'I', 'D', 'T)', 'G', 'A', '_merge']]
-        dfInvoice[dfInvoice['_merge'] == 'left_only'].to_csv('./IFiles/I.csv', index=False)
-        dfInvoice[dfInvoice['_merge'] == 'right_only'].to_csv('./IFiles/IT.csv', index=False)
+        dfInvoice = pd.merge(df2B, csvInwardSupply, left_on=['Invoice Number'], right_on=['D-Invoice No.'], how='outer', indicator=True)
+        dfInvoice = dfInvoice[['GSTIN of supplier', 'Trade/Legal name', 'Invoice Number', 'D-Invoice No.', 'Taxable Value (₹)', 'G-Taxable Value', 'A-Unit Name', '_merge']]
+        dfInvoice[dfInvoice['_merge'] == 'left_only'].to_csv('./ITC Files/ITC2BOnlyInvoice.csv', index=False)
+        dfInvoice[dfInvoice['_merge'] == 'right_only'].to_csv('./ITC Files/ITCDivisionOnlyInvoice.csv', index=False)
 
-        InvoiceOnlyArray = dfInvoiceAmount['D'].to_numpy()
-        dfInvoice = dfInvoice.query("`D` not in @InvoiceOnlyArray")
-        dfInvoice = dfInvoice.dropna(subset=['D'])
-        dfInvoice.to_csv("./IFiles/ITch.csv",index=False)
+        InvoiceOnlyArray = dfInvoiceAmount['D-Invoice No.'].to_numpy()
+        dfInvoice = dfInvoice.query("`D-Invoice No.` not in @InvoiceOnlyArray")
+        dfInvoice = dfInvoice.dropna(subset=['D-Invoice No.'])
+        dfInvoice.to_csv("./ITC Files/ITCInvoiceMatchAmountMismatch.csv",index=False)
 
         print("Success")
         messagebox.showinfo("Success", "Required CSVs have been generated and are in the Invoice Matching Files folder")
@@ -230,8 +232,9 @@ def unitConsolidation():
 
         listFilesRecursive(directoryPath)
 
-        stringsToCombine = ["S", "O", "R", "G", "I", "D"]
+        stringsToCombine = ["Summary", "Outward Supply", "Reverse Charges", "GST-TDS", "Inward Supplies (ITC)", "Debit & Credit Note"]
         for string in stringsToCombine:
+            # os.system("copy " + string + "\".csv" + " \"Combined " + string + "\".csv")
             print("copy \".\\Consolidated Files\\*" + string + ".csv\" \".\\Consolidated Files\\Combined " + string + ".csv\"")
             os.system("copy \".\\Consolidated Files\\*" + string + ".csv\" \".\\Consolidated Files\\Combined " + string + ".csv\"")
 
@@ -249,45 +252,49 @@ def outwardSupplyProcessing():
         return
 
     try:
-        os.makedirs("./Os", exist_ok=True)
+        os.makedirs("./Outward Supply Files", exist_ok=True)
 
         dfAll = pd.read_csv(filePath)
 
-        columnsToFloat = ['J', 'K', 'L', 'M', 'N']
+        columnsToFloat = ['J-Taxable Value included Mandi & Excluded TCS', 'K-IGST', 'L-CGST', 'M-SGST', 'N-Total Tax']
         for columns in columnsToFloat:
             dfAll[columns] = dfAll[columns].replace('NIL', '0', regex=True)
             dfAll[columns] = dfAll[columns].replace('-', '0', regex=True)
             dfAll[columns] = dfAll[columns].astype('float')
 
-        dfB2B = dfAll.loc[dfAll['B'].str.len() == 15]
+        dfB2B = dfAll.loc[dfAll['B-GSTIN/UIN of Recipient'].str.len() == 15]
         dfB2BTaxable = dfB2B.loc[dfB2B['N-Total Tax']>0]
         dfB2BNil = dfB2B.loc[dfB2B['N-Total Tax']==0]
-        dfB2BTaxable.to_csv("./OFiles/O.csv", index=False)
-        dfB2BNil.to_csv("./OFiles/OS.csv", index=False)
+        dfB2BTaxable.to_csv("./Outward Supply Files/OSB2BTaxable.csv", index=False)
+        dfB2BNil.to_csv("./Outward Supply Files/OSB2BNil.csv", index=False)
 
-        dfB2C = dfAll.loc[dfAll['B'].str.len() != 15]
+        dfB2C = dfAll.loc[dfAll['B-GSTIN/UIN of Recipient'].str.len() != 15]
         dfB2CTaxable = dfB2C.loc[dfB2C['N-Total Tax']>0]
         dfB2CNil = dfB2C.loc[dfB2C['N-Total Tax']==0]
-        dfB2CTaxable.to_csv("./OFiles/OSB.csv", index=False)
-        dfB2CNil.to_csv("./OFiles/OSB2.csv", index=False)
-        dfB2CNilByGroup = dfB2CNil.groupby('A', as_index=False).sum()
-        dfB2CNilByGroup.to_csv("./OFiles/OSB2C.csv", index=False)
+        dfB2CTaxable.to_csv("./Outward Supply Files/OSB2CTaxable.csv", index=False)
+        dfB2CNil.to_csv("./Outward Supply Files/OSB2CNil.csv", index=False)
+        dfB2CNilByGroup = dfB2CNil.groupby('A-UNIT NAME', as_index=False).sum()
+        dfB2CNilByGroup.to_csv("./Outward Supply Files/OSB2CNilByGroup.csv", index=False)
 
         dfNil = pd.concat([dfB2BNil, dfB2CNil], axis=0, ignore_index=True)
 
-        dfB2BTaxable = dfB2BTaxable.drop(['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'], axis=1)
-        dfB2CTaxable = dfB2CTaxable.drop(['B', 'C', 'D', 'E', 'F 'G', 'H', 'I'], axis=1)
-        dfNil = dfNil.drop(['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'], axis=1)
+        dfB2BTaxable = dfB2BTaxable.drop(['B-GSTIN/UIN of Recipient', 'C-Receiver Name', 'D-Invoice Number', 'E-Item wise Description  of Goods', 'F-Invoice date', 'G-Invoice Value', 'H-HSN Code', 'I- Rate'], axis=1)
+        dfB2CTaxable = dfB2CTaxable.drop(['B-GSTIN/UIN of Recipient', 'C-Receiver Name', 'D-Invoice Number', 'E-Item wise Description  of Goods', 'F-Invoice date', 'G-Invoice Value', 'H-HSN Code', 'I- Rate'], axis=1)
+        dfNil = dfNil.drop(['B-GSTIN/UIN of Recipient', 'C-Receiver Name', 'D-Invoice Number', 'E-Item wise Description  of Goods', 'F-Invoice date', 'G-Invoice Value', 'H-HSN Code', 'I- Rate'], axis=1)
 
-        dfB2BTaxable = dfB2BTaxable.groupby('A', as_index=False).sum()
-        dfB2CTaxable = dfB2CTaxable.groupby('A', as_index=False).sum()
-        dfNil = dfNil.groupby('A', as_index=False).sum()
+        dfB2BTaxable = dfB2BTaxable.groupby('A-UNIT NAME', as_index=False).sum()
+        dfB2CTaxable = dfB2CTaxable.groupby('A-UNIT NAME', as_index=False).sum()
+        dfNil = dfNil.groupby('A-UNIT NAME', as_index=False).sum()
+
+        dfB2BTaxable.rename(columns={'J-Taxable Value included Mandi & Excluded TCS': 'B2B'}, inplace=True)
+        dfB2CTaxable.rename(columns={'J-Taxable Value included Mandi & Excluded TCS': 'B2C'}, inplace=True)
+        dfNil.rename(columns={'J-Taxable Value included Mandi & Excluded TCS': 'Nil'}, inplace=True)
 
         dfFinal = pd.concat([dfB2BTaxable, dfB2CTaxable, dfNil]).groupby(['A-UNIT NAME']).sum()
         dfFinal['B2B+B2C Total'] = dfFinal['B2B'] + dfFinal['B2C']
         dfFinal['B2B+B2C+Nil Total']= dfFinal['B2B+B2C Total'] + dfFinal['Nil']
 
-        dfFinal.to_csv('./OFiles/OSA.csv')
+        dfFinal.to_csv('./Outward Supply Files/OSAdvice.csv')
 
         print("Success")
         messagebox.showinfo("Success", "Required CSVs have been generated and are in the Invoice Matching Files folder")
@@ -304,9 +311,9 @@ def outwardSupplyMatching():
         return
     try:
         dfUKSoftFile = pd.read_excel(UKSoftFilePath, sheet_name="Sheet1", skiprows=4)
-        dfUKSoftFile['T'] = dfUKSoftFile['T'].astype('float64')
-        dfUKSoftFile['I.'] = dfUKSoftFile['I.'].astype('string')
-        columnsToFloat = ['T']
+        dfUKSoftFile['Taxable Value'] = dfUKSoftFile['Total Amount Which Tax will be Calculated'].astype('float64')
+        dfUKSoftFile['Invoice No.'] = dfUKSoftFile['Invoice No.'].astype('string')
+        columnsToFloat = ['Taxable Value']
         for columns in columnsToFloat:
             dfUKSoftFile[columns] = dfUKSoftFile[columns].replace('NIL', '0', regex=True)
             dfUKSoftFile[columns] = dfUKSoftFile[columns].replace('-', '0', regex=True)
@@ -324,19 +331,30 @@ def outwardSupplyMatching():
         return
 
     try:
-        os.makedirs("./OFiles", exist_ok=True)
+        os.makedirs("./Outward Supply Matched Files", exist_ok=True)
         dfOS = pd.read_csv(filePathOutwardSupply)
-        columnsToFloat = ['J', 'K', 'L', 'M', 'N']
+        columnsToFloat = ['J-Taxable Value included Mandi & Excluded TCS', 'K-IGST', 'L-CGST', 'M-SGST', 'N-Total Tax']
         for columns in columnsToFloat:
             dfOS[columns] = dfOS[columns].replace('NIL', '0', regex=True)
             dfOS[columns] = dfOS[columns].replace('-', '0', regex=True)
             dfOS[columns] = dfOS[columns].astype('float')
 
-        dfInvNoAndValueMatch = pd.merge(dfUKSoftFile, dfOS, left_on=['I.', 'T'], right_on=['D','J'], how='outer', indicator=True)
-        dfInvNoAndValueMatch = dfInvNoAndValueMatch[['B', 'C', 'I', 'D', 'T', 'J', 'A' , 'K', 'L', 'M', 'N', '_merge']]
-        dfInvNoAndValueMatch[dfInvNoAndValueMatch['_merge'] == 'left_only'].to_csv("./OFiles/UKSoftOnly.csv")
-        dfInvNoAndValueMatch[dfInvNoAndValueMatch['_merge'] == 'right_only'].to_csv("./OFiles/CombinedOSOnly.csv")
-        dfInvNoAndValueMatch[dfInvNoAndValueMatch['_merge'] == 'both'].to_csv("./OFiles/CommonOSUKSoft.csv")
+        dfInvNoAndValueMatch = pd.merge(dfUKSoftFile, dfOS, left_on=['Invoice No.', 'Taxable Value'], right_on=['D-Invoice Number','J-Taxable Value included Mandi & Excluded TCS'], how='outer', indicator=True)
+        dfInvNoAndValueMatch = dfInvNoAndValueMatch[['B-GSTIN/UIN of Recipient', 'C-Receiver Name', 'Invoice No.', 'D-Invoice Number', 'Taxable Value', 'J-Taxable Value included Mandi & Excluded TCS', 'A-UNIT NAME' , 'K-IGST', 'L-CGST', 'M-SGST', 'N-Total Tax', '_merge']]
+        dfInvNoAndValueMatch[dfInvNoAndValueMatch['_merge'] == 'left_only'].to_csv("./Outward Supply Matched Files/UKSoftOnly.csv")
+        dfInvNoAndValueMatch[dfInvNoAndValueMatch['_merge'] == 'right_only'].to_csv("./Outward Supply Matched Files/CombinedOSOnly.csv")
+        dfInvNoAndValueMatch[dfInvNoAndValueMatch['_merge'] == 'both'].to_csv("./Outward Supply Matched Files/CommonOSUKSoft.csv")
+
+        # dfInvoice = pd.merge(df2B, csvInwardSupply, left_on=['Invoice Number'], right_on=['D-Invoice No.'], how='outer', indicator=True)
+        # dfInvoice = dfInvoice[['GSTIN of supplier', 'Trade/Legal name', 'Invoice Number', 'D-Invoice No.', 'Taxable Value (₹)', 'G-Taxable Value', 'A-Unit Name', '_merge']]
+        # dfInvoice[dfInvoice['_merge'] == 'left_only'].to_csv('./ITC Files/ITC2BOnlyInvoice.csv', index=False)
+        # dfInvoice[dfInvoice['_merge'] == 'right_only'].to_csv('./ITC Files/ITCDivisionOnlyInvoice.csv', index=False)
+
+        # InvoiceOnlyArray = dfInvoiceAmount['D-Invoice No.'].to_numpy()
+        # dfInvoice = dfInvoice.query("`D-Invoice No.` not in @InvoiceOnlyArray")
+        # dfInvoice = dfInvoice.dropna(subset=['D-Invoice No.'])
+        # dfInvoice.to_csv("./ITC Files/ITCInvoiceMatchAmountMismatch.csv",index=False)
+
         print("Success")
         messagebox.showinfo("Success", "Required CSVs have been generated and are in the Invoice Matching Files folder")
 
